@@ -75,7 +75,11 @@ def getInstanceBackupData(instance_id: str) -> dict:
         "DBSnapshotIdentifier"
     ]
 
-    refined_instance_backup_data = refineBackupData(raw_instance_backup_data, target_data)[0]
+    try:
+        refined_instance_backup_data = refineBackupData(raw_instance_backup_data, target_data)[0]
+    except IndexError:
+        return {}
+
     return refined_instance_backup_data
 
 
@@ -114,10 +118,14 @@ def markClusterMembersAnalyzed(members: list) -> None:
         analyzed_instances.append(this_instance_id)
 
 
-def gaugeBackupCompliance(backup_data: dict) -> bool:
+def backupIsCompliant(backup_data: dict) -> bool:
     # TODO: determine RPO; currently assuming 24 hours
 
-    snapshot_create_time = backup_data['SnapshotCreateTime']
+    try:
+        snapshot_create_time = backup_data['SnapshotCreateTime']
+    except KeyError:
+        logger.debug("SnapshotCreateTime not detected, assuming backup is non-compliant")
+        return False
 
     now = datetime.datetime.now(tz=None)
 
@@ -136,7 +144,7 @@ def auditRDSClusters() -> None:
 
         rds_backup_data[this_cluster_id] = {
             "backup_data": this_cluster_backup_data,
-            "backup_is_compliant": gaugeBackupCompliance(this_cluster_backup_data),
+            "backup_is_compliant": backupIsCompliant(this_cluster_backup_data),
             "tags": flattenTags(cluster['TagList'])
         }
 
@@ -154,7 +162,7 @@ def auditRDSInstances() -> None:
             this_instance_backup_data = getInstanceBackupData(this_instance_id)
             rds_backup_data[this_instance_id] = {
                 "backup_data": this_instance_backup_data,
-                "backup_is_compliant": gaugeBackupCompliance(this_instance_backup_data),
+                "backup_is_compliant": backupIsCompliant(this_instance_backup_data),
                 "tags": flattenTags(instance['TagList'])
             }
             analyzed_instances.append(this_instance_id)
