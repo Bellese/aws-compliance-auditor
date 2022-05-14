@@ -1,7 +1,10 @@
+import datetime
+
 import boto3
 import os
 import logging
-import json
+
+from typing import List
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
@@ -17,10 +20,10 @@ rds_client = None
 cluster_data = None
 instance_data = None
 
-backup_data = {}
-instance_identifiers = []
+rds_backup_data = {}
+analyzed_instances = []
 
-
+# boto3 Data Fetching
 def getRDSClient():
     global rds_client
 
@@ -30,7 +33,7 @@ def getRDSClient():
     return rds_client
 
 
-def getClusters():
+def getClusters() -> list:
     global cluster_data
 
     if cluster_data is None:
@@ -39,7 +42,21 @@ def getClusters():
     return cluster_data
 
 
-def getInstances():
+def getClusterBackupData(cluster_id: str) -> dict:
+    raw_cluster_backup_data = getRDSClient().describe_db_cluster_snapshots(DBClusterIdentifier=cluster_id)[
+        'DBClusterSnapshots']
+    target_data = [
+        "SnapshotCreateTime",
+        "ClusterCreateTime",
+        "DBClusterSnapshotArn",
+        "DBClusterSnapshotIdentifier"
+    ]
+
+    refined_cluster_backup_data = refineBackupData(raw_cluster_backup_data, target_data)[0]
+    return refined_cluster_backup_data
+
+
+def getInstances() -> list:
     global instance_data
 
     if instance_data is None:
@@ -48,144 +65,130 @@ def getInstances():
     return instance_data
 
 
-def processClusterBackupData(raw):
-    processed = []
+def getInstanceBackupData(instance_id: str) -> dict:
+    raw_instance_backup_data = getRDSClient().describe_db_snapshots(DBInstanceIdentifier=instance_id)['DBSnapshots']
 
-    for element in raw:
-        processed.append({
-            'snapshot_create_time': element['SnapshotCreateTime'],
-            'cluster_create_time': element['ClusterCreateTime'],
-            'complete': element['PercentProgress'] == 100,
-            'automated': element['SnapshotType'] == 'automated',
-            'cluster_snapshot_arn': element['DBClusterSnapshotArn'],
-            'cluster_snapshot_identifier': element['DBClusterSnapshotIdentifier']
-        })
+    target_data = [
+        "SnapshotCreateTime",
+        "InstanceCreateTime",
+        "DBSnapshotArn",
+        "DBSnapshotIdentifier"
+    ]
 
-    processed.reverse()
-    return processed
-
-def processInstanceBackupData(raw):
-    processed = []
-
-    for s in raw:
-        processed.append({
-            'snapshot_create_time': s['SnapshotCreateTime'],
-            'cluster_create_time': s['InstanceCreateTime'],
-            'complete': s['PercentProgress'] == 100,
-            'automated': s['SnapshotType'] == 'automated',
-            'cluster_snapshot_arn': s['DBSnapshotArn'],
-            'cluster_snapshot_identifier': s['DBSnapshotIdentifier']
-        })
-
-    return processed
-
-def processAutomatedSnapshotData(raw):
-    processed = {
-        'restore_window': raw['RestoreWindow'],
-        'instance_create_time': raw['InstanceCreateTime'],
-        'automated_backup_arm': raw['DBInstanceAutomatedBackupsArn']
-    }
-
-    return processed
+    refined_instance_backup_data = refineBackupData(raw_instance_backup_data, target_data)[0]
+    return refined_instance_backup_data
 
 
-def auditClusters():
-    global backup_data
-    global instance_identifiers
+# Snapshot Audit Helpers
+def snapshotIsComplete(snapshot: dict) -> bool:
+    return snapshot["PercentProgress"] == 100
 
-    # TODO: include owner and POC from tag list in return data struct
+
+def snapshotIsAutomated(snapshot: dict) -> bool:
+    return snapshot["SnapshotType"] == "automated"
+
+
+def refineBackupData(rawBackupData: dict, targetData: List[str]) -> List[dict]:
+    refined = []
+
+    for snapshot in rawBackupData:
+        r = {}
+
+        for index in targetData:
+            r[index] = snapshot[index]
+
+            r['complete'] = snapshotIsComplete(snapshot)
+            r['automated'] = snapshotIsAutomated(snapshot)
+
+        refined.append(r)
+
+    refined.reverse()
+    return refined
+
+
+def markClusterMembersAnalyzed(members: list) -> None:
+    global analyzed_instances
+
+    for m in members:
+        this_instance_id = m['DBInstanceIdentifier']
+        analyzed_instances.append(this_instance_id)
+
+
+def gaugeBackupCompliance(backup_data: dict) -> bool:
+    # TODO: determine RPO; currently assuming 24 hours
+
+    snapshot_create_time = backup_data['SnapshotCreateTime']
+
+    now = datetime.datetime.now(tz=None)
+
+    snapshot_age = now - snapshot_create_time.replace(tzinfo=None)
+
+    return snapshot_age < datetime.timedelta(hours=24)
+
+
+def auditRDSClusters() -> None:
+    global rds_backup_data
+    global analyzed_instances
 
     for cluster in getClusters():
-        cluster_id = cluster['DBClusterIdentifier']
-        logger.info(f"Auditing {cluster_id}")
+        this_cluster_id = cluster['DBClusterIdentifier']
+        this_cluster_backup_data = getClusterBackupData(this_cluster_id)
 
-        raw_cluster_backup_data = getRDSClient().describe_db_cluster_snapshots(DBClusterIdentifier=cluster_id)[
-            'DBClusterSnapshots']
-
-        backup_data[cluster_id] = {
-            "backup_data": processClusterBackupData(raw_cluster_backup_data)
+        rds_backup_data[this_cluster_id] = {
+            "backup_data": this_cluster_backup_data,
+            "backup_is_compliant": gaugeBackupCompliance(this_cluster_backup_data),
+            "tags": flattenTags(cluster['TagList'])
         }
 
-        cluster_members = cluster['DBClusterMembers']
+        markClusterMembersAnalyzed(cluster['DBClusterMembers'])
 
-        for instance in cluster_members:
-            instance_id = instance['DBInstanceIdentifier']
-            instance_identifiers.append(instance_id)
 
-def auditInstances():
-    global backup_data
-    global instance_data
-    global instance_identifiers
+def auditRDSInstances() -> None:
+    global rds_backup_data
+    global analyzed_instances
 
-    # TODO: include tag list in returned data struct
-    for instance in instance_data:
-        instance_id = instance['DBInstanceIdentifier']
+    for instance in getInstances():
+        this_instance_id = instance['DBInstanceIdentifier']
 
-        already_analyzed = instance_id in instance_identifiers
-
-        if not already_analyzed:
-            instance_identifiers.append(instance_id)
-
-            snapshot_data = getRDSClient().describe_db_snapshots(DBInstanceIdentifier=instance_id)['DBSnapshots']
-            automated_snapshot_data = getRDSClient().describe_db_instance_automated_backups(DBInstanceIdentifier=instance_id)['DBInstanceAutomatedBackups'][0]
-
-            processed_snapshot_data = processInstanceBackupData(snapshot_data)
-            processed_automated_snapshot_data = processAutomatedSnapshotData(automated_snapshot_data)
-
-            backup_data[instance_id] = {
-                "backup_data": {
-                    "snapshots": processed_snapshot_data,
-                    "automated_snapshot": processed_automated_snapshot_data
-                }
+        if this_instance_id not in analyzed_instances:
+            this_instance_backup_data = getInstanceBackupData(this_instance_id)
+            rds_backup_data[this_instance_id] = {
+                "backup_data": this_instance_backup_data,
+                "backup_is_compliant": gaugeBackupCompliance(this_instance_backup_data),
+                "tags": flattenTags(instance['TagList'])
             }
-
-def auditRDS():
-    global backup_data
-    auditClusters()
-
-    instances = getInstances()
-
-    if len(instances) != len(instance_identifiers):
-        logging.info("The number of standalone instances is different from the number of cluster-managed instances.")
-        logging.info("Analyzing standalone instances...")
-        auditInstances()
-
-    logger.info(f"{len(instance_identifiers)} instances analyzed")
-
-    return backup_data
+            analyzed_instances.append(this_instance_id)
 
 
-def formatReturnData(data):
+def flattenTags(tags: dict) -> dict:
     ret = {}
 
-    for index in data:
-        _this = data[index]["backup_data"]
-
-        latest_snapshot = None
-        latest_automated_snapshot = None
-        try:
-            latest_snapshot = _this[0]
-        except KeyError:
-            # If a numeric index doesn't exist on _this, we know its shape must be
-            # {"snapshots": [{}, {}, {}, ...], "automated_snapshots": [{}]}
-            latest_snapshot = _this["snapshots"][0]
-            latest_automated_snapshot = _this["automated_snapshot"]
-
-        ret[index] = {
-                "latest_snapshot": latest_snapshot,
-                "latest_automated_snapshot": latest_automated_snapshot
-        }
+    for tag in tags:
+        ret[tag['Key']] = tag['Value']
 
     return ret
 
 
-def getRDSBackupData():
-    global backup_data
+def gaugeAuditCoverage() -> bool:
+    global analyzed_instances
 
-    if len(backup_data.keys()) == 0:
-        backup_data = auditRDS()
-        backup_data = formatReturnData(backup_data)
+    everything_is_audited = True
 
-    backup_data_json = json.dumps(backup_data, indent=4, sort_keys=False, default=str)
+    if len(analyzed_instances) != len(getInstances()):
+        everything_is_audited = False
 
-    return backup_data_json
+    return everything_is_audited
+
+
+def auditRDS() -> dict:
+    global rds_backup_data
+    global analyzed_instances
+
+    auditRDSClusters()
+
+    everything_is_audited = gaugeAuditCoverage()
+
+    if not everything_is_audited:
+        auditRDSInstances()
+
+    return rds_backup_data

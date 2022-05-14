@@ -1,4 +1,3 @@
-import redshift.redshift
 import rds.rds as rds
 import redshift.redshift as rs
 
@@ -22,16 +21,23 @@ logger = logging.getLogger()
 
 def main():
 
-    redshift_status = rs.getClusterSnapshots()
+    # redshift_status = rs.getClusterSnapshots()
 
-    rds_status = rds.getRDSBackupData()
+    rds_status = rds.auditRDS()
+    redshift_status = rs.auditRedshift()
 
+    aggregate_backup_status = {
+        "rds": rds_status,
+        "redshift": redshift_status
+    }
 
-    # aggregated_backup_status_json = json.dumps(aggregated_backup_status, indent=4, sort_keys=False, default=str)
     # Write output
     account = os.getenv("AWS_PROFILE", "NULL_PROFILE")
     output_file = open(f'backup_status_{account}.json', 'w+')
-    output_file.write(rds_status)
+
+    output_json = json.dumps(aggregate_backup_status, indent=4, sort_keys=False, default=str)
+    output_file.write(output_json)
+
     output_file.close()
 
 

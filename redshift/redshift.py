@@ -16,6 +16,9 @@ redshift_client = None
 redshift_cluster_data = None
 redshift_cluster_identifiers = []
 
+redshift_backup_data = {}
+
+
 def getRedshiftClient():
     global redshift_client
 
@@ -24,6 +27,7 @@ def getRedshiftClient():
 
     return redshift_client
 
+
 def getClusterData():
     global redshift_cluster_data
 
@@ -31,6 +35,7 @@ def getClusterData():
         redshift_cluster_data = getRedshiftClient().describe_clusters()['Clusters']
 
     return redshift_cluster_data
+
 
 def getClusterIdentifiers():
     global redshift_cluster_identifiers
@@ -44,13 +49,19 @@ def getClusterIdentifiers():
     return redshift_cluster_identifiers
 
 
-
 def getClusterSnapshots():
+    global redshift_backup_data
+
     cluster_ids = getClusterIdentifiers()
 
-    snapshot_data = {}
-
     for id in cluster_ids:
-        snapshot_data[id] = getRedshiftClient().describe_cluster_snapshots(ClusterIdentifier=id)
+        raw_data = getRedshiftClient().describe_cluster_snapshots(ClusterIdentifier=id)
+        redshift_backup_data[id] = raw_data
 
-    logger.info(snapshot_data)
+    return redshift_backup_data
+
+
+def auditRedshift():
+    # TODO: refine cluster snapshot data
+    # TODO: gauge cluster snapshot compliance
+    return getClusterSnapshots()
