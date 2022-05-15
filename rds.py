@@ -3,6 +3,7 @@ import datetime
 import boto3
 import os
 import logging
+import utils
 
 from typing import List
 
@@ -145,7 +146,7 @@ def auditRDSClusters() -> None:
         rds_backup_data[this_cluster_id] = {
             "backup_data": this_cluster_backup_data,
             "backup_is_compliant": backupIsCompliant(this_cluster_backup_data),
-            "tags": flattenTags(cluster['TagList'])
+            "tags": utils.flattenTags(cluster['TagList'])
         }
 
         markClusterMembersAnalyzed(cluster['DBClusterMembers'])
@@ -163,18 +164,9 @@ def auditRDSInstances() -> None:
             rds_backup_data[this_instance_id] = {
                 "backup_data": this_instance_backup_data,
                 "backup_is_compliant": backupIsCompliant(this_instance_backup_data),
-                "tags": flattenTags(instance['TagList'])
+                "tags": utils.flattenTags(instance['TagList'])
             }
             analyzed_instances.append(this_instance_id)
-
-
-def flattenTags(tags: dict) -> dict:
-    ret = {}
-
-    for tag in tags:
-        ret[tag['Key']] = tag['Value']
-
-    return ret
 
 
 def gaugeAuditCoverage() -> bool:
