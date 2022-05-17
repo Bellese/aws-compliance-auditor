@@ -61,13 +61,13 @@ def buildTabulateInput(input_data: dict):
 def main():
 
     rds_status = rds.auditRDS()
-    redshift_status = rs.auditRedshift()
-    efs_status = efs.auditEFS()
-
+    # redshift_status = rs.auditRedshift()
+    # efs_status = efs.auditEFS()
+    #
     aggregate_backup_status = {
         "rds": rds_status,
-        "redshift": redshift_status,
-        "efs": efs_status
+        # "redshift": redshift_status,
+        # "efs": efs_status
     }
 
     c, nc = buildTabulateInput(aggregate_backup_status)
