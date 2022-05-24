@@ -20,6 +20,8 @@ logger = logging.getLogger()
 # Establish boto3 client
 rds_client = boto3.client('rds')
 
+# https://us-east-1.console.aws.amazon.com/rds/home?region=us-east-1#database:id=analytics-backend-acr-bundle-micrdb-20220429163759925100000004;is-cluster=true
+
 
 def getClusters() -> list:
     return rds_client.describe_db_clusters()['DBClusters']
@@ -56,7 +58,7 @@ def auditRDS():
         latest_cluster_backup = getLatestSnapshot(this_cluster_backup_data)
 
         backup_data[cluster_id] = {
-            "backup_data": latest_cluster_backup,
+            "backup_data": latest_cluster_backup['SnapshotCreateTime'],
             "backup_is_compliant": backupIsCompliant(latest_cluster_backup),
             "tags": utils.flattenTags(cluster['TagList'])
         }
@@ -82,7 +84,7 @@ def auditRDS():
                 latest_instance_backup = getLatestSnapshot(this_instance_backup_data)
 
                 backup_data[instance_id] = {
-                    "backup_data": latest_instance_backup,
+                    "backup_data": latest_instance_backup['SnapshotCreateTime'],
                     "backup_is_compliant": backupIsCompliant(latest_instance_backup),
                     "tags": utils.flattenTags(instance['TagList'])
                 }
@@ -93,7 +95,7 @@ def auditRDS():
 
 
 def backupIsCompliant(backup_data: dict) -> bool:
-    # TODO: determine RPO; currently assuming 24 hours
+    # TODO: determine RPO
     # TODO extend ruleset?
 
     try:

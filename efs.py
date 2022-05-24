@@ -1,13 +1,8 @@
-import datetime
-
 import boto3
 import os
 import logging
+
 import utils
-
-from typing import List
-
-import botocore
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
@@ -20,8 +15,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 
 efs_client = None
-file_system_identifiers = []
-efs_backup_data = {}
 
 
 def getEFSClient():
@@ -33,40 +26,25 @@ def getEFSClient():
     return efs_client
 
 
-def getFileSystemIdentifiers() -> List[str]:
-    global file_system_identifiers
-
-    if len(file_system_identifiers) == 0:
-        file_systems = getEFSClient().describe_file_systems()['FileSystems']
-
-        for fs in file_systems:
-            this_file_system_id = fs['FileSystemId']
-            file_system_identifiers.append(this_file_system_id)
-
-    return file_system_identifiers
-
-
-def getFileSystemBackups() -> dict:
-
+def auditEFS():
     backup_data = {}
 
-    for fs_id in getFileSystemIdentifiers():
+    file_systems = getEFSClient().describe_file_systems()['FileSystems']
+
+    for fs in file_systems:
+        fs_id = fs['FileSystemId']
         try:
             this_fs_backup_data = getEFSClient().describe_backup_policy(FileSystemId=fs_id)
             backup_data[fs_id] = {
-                "backup_data": this_fs_backup_data,
-                "backup_is_compliant": this_fs_backup_data['BackupPolicy']['Status'] == "ENABLED"
+                "backup_data": this_fs_backup_data['BackupPolicy']['Status'],
+                "backup_is_compliant": this_fs_backup_data['BackupPolicy']['Status'] == "ENABLED",
+                "tags": utils.flattenTags(fs['Tags'])
             }
         except:
             backup_data[fs_id] = {
                 "backup_data": "NONE",
-                "backup_is_compliant": False
+                "backup_is_compliant": False,
+                "tags": utils.flattenTags(fs['Tags'])
             }
 
     return backup_data
-
-
-def auditEFS():
-    data = getFileSystemBackups()
-
-    return data
