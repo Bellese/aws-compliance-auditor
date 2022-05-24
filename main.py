@@ -1,10 +1,12 @@
-import redshift.redshift
-import rds.rds as rds
-import redshift.redshift as rs
-
-import json
-import logging
 import os
+
+import efs
+import rds
+import redshift as rs
+import dynamodb as ddb
+import utils
+import logging
+import functools
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
@@ -16,24 +18,44 @@ logging.basicConfig(
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 
-
-# TODO: only return DBs that DO NOT have auto-backup enabled; check SBX instances that Simon made
 # TODO: add click options (ex: if --backup, only gauge backups; if --rds, only audit RDS resources, etc)
 
 def main():
+    logger.info("Auditing DynamoDB resources")
+    dynamo_status = ddb.auditDynamo()
+    logger.info("Auditing RDS resources")
+    rds_status = rds.auditRDS()
+    logger.info("Auditing Redshift resources")
+    redshift_status = rs.auditRedshift()
+    logger.info("Auditing EFS resources")
+    efs_status = efs.auditEFS()
 
-    redshift_status = rs.getClusterSnapshots()
+    aggregate_backup_status = {
+        "rds": rds_status,
+        "redshift": redshift_status,
+        "efs": efs_status,
+        "dynamo": dynamo_status
+    }
 
-    rds_status = rds.getRDSBackupData()
+    logger.info("Building Markdown tables")
 
+    compliant_markdown, noncompliant_markdown = utils.buildMarkdown(aggregate_backup_status)
 
-    # aggregated_backup_status_json = json.dumps(aggregated_backup_status, indent=4, sort_keys=False, default=str)
     # Write output
-    account = os.getenv("AWS_PROFILE", "NULL_PROFILE")
-    output_file = open(f'backup_status_{account}.json', 'w+')
-    output_file.write(rds_status)
+    account = utils.getShortAccountName(os.getenv("AWS_PROFILE", "NULL_PROFILE"))
+
+    output_file = open(f'output/{account}_audit_results.md', 'w')
+
+    final_markdown = f"# HQR {account} BACKUP COMPLIANCE REPORT\n" + noncompliant_markdown + "\n\n" + compliant_markdown
+
+    output_file.write(final_markdown)
+
     output_file.close()
+
+    logger.info("Audit complete")
 
 
 if __name__ == '__main__':
     main()
+
+
