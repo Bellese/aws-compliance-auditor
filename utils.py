@@ -65,6 +65,8 @@ def buildTabulateInput(input_data: dict, service_identifier: str):
             except KeyError:
                 logger.info(f"No Owner found for resource {resource_identifier}. Dumping tags")
 
+            owner = getUpdatedEmail(owner)
+
             noncompliant_table_data.append([
                 resource_identifier,
                 f"[{owner}](mailto:{owner})"
@@ -109,3 +111,20 @@ def getShortAccountName(account: str):
         name = "IMPL"
 
     return name
+
+
+def getUpdatedEmail(email: str) -> str:
+
+    if "team-z-fighters" in email:
+        email = "hqr-access-team@bellese.io"
+
+    if "team-watchmen" in email:
+        email = "hqr-feedback-and-support@bellese.io"
+
+    if "power-rangers" in email:
+        email = "hqr-tech-leads@bellese.io"
+
+    if "hqr-cloud-wizards" in email:
+        email = "hqr-devops@bellese.io"
+
+    return email
