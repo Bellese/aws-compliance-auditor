@@ -33,15 +33,16 @@ def auditEFS():
 
     for fs in file_systems:
         fs_id = fs['FileSystemId']
+        fs_name = fs['Name']
         try:
             this_fs_backup_data = getEFSClient().describe_backup_policy(FileSystemId=fs_id)
-            backup_data[fs_id] = {
+            backup_data[fs_name] = {
                 "backup_data": this_fs_backup_data['BackupPolicy']['Status'],
                 "backup_is_compliant": this_fs_backup_data['BackupPolicy']['Status'] == "ENABLED",
                 "tags": utils.flattenTags(fs['Tags'])
             }
         except:
-            backup_data[fs_id] = {
+            backup_data[fs_name] = {
                 "backup_data": "NONE",
                 "backup_is_compliant": False,
                 "tags": utils.flattenTags(fs['Tags'])
